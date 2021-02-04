@@ -1,0 +1,1 @@
+python train.py --jobid Xraytest --mode N2V --data ../X-ray-defects/002_2_aligned.npy --nvalid 4 --load_model --remove_edge=20 --mode=N2N --patch_size=800 --minibatch_size=8

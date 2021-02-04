@@ -37,7 +37,7 @@ def getStratifiedCoords2D(numPix, shape):
     return coords
 
 
-def randomCropFRI(data, size, numPix, supervised=False, counter=None, augment=True):
+def randomCropFRI(data, size, numPix, supervised=False, counter=None, augment=True, mode='N2V'):
     '''
     Crop a patch from the next image in the dataset.
     The patches are augmented by randomly deciding to mirror them and/or rotating them by multiples of 90 degrees.
@@ -85,6 +85,10 @@ def randomCropFRI(data, size, numPix, supervised=False, counter=None, augment=Tr
     if supervised:
         img=data[index,...,0]
         imgClean=data[index,...,1]
+        manipulate=False
+    elif mode == 'N2N':
+        img=data[index]
+        imgClean= data[(index+np.random.randint(1, data.shape[0]))%data.shape[0]]
         manipulate=False
     else:
         img=data[index]
@@ -178,7 +182,7 @@ def randomCrop(img, size, numPix, imgClean=None, augment=True, manipulate=True):
     return imgOut, imgOutC, mask
 
 
-def trainingPred(my_train_data, net, dataCounter, size, bs, numPix, device, augment=True, supervised=True):
+def trainingPred(my_train_data, net, dataCounter, size, bs, numPix, device, augment=True, mode='N2V', supervised=True):
     '''
     This function will assemble a minibatch and process it using the a network.
     
@@ -226,6 +230,7 @@ def trainingPred(my_train_data, net, dataCounter, size, bs, numPix, device, augm
                                           numPix,
                                           counter=dataCounter,
                                           augment=augment,
+                                          mode=mode,
                                           supervised=supervised)
         inputs[j,:,:,:]=utils.imgToTensor(im)
         labels[j,:,:]=utils.imgToTensor(l)
@@ -287,6 +292,7 @@ def trainNetwork(net, trainData, valData, noiseModel, postfix, device,
                  numMaskedPixels=100*100/32.0, 
                  virtualBatchSize=20, valSize=20,
                  augment=True,
+                 mode='N2V',
                  supervised=False
                  ):
     '''
@@ -343,9 +349,14 @@ def trainNetwork(net, trainData, valData, noiseModel, postfix, device,
     net.mean=np.mean(combined)
     net.std=np.std(combined)
     
-    net.to(device)
+    # net.to(device)
     
     optimizer = optim.Adam(net.parameters(), lr=learningRate)
+    try:
+        optimizer.load_state_dict(torch.load(os.path.join(directory, 'optimizer.pt')))
+        print('Load optimizer status')
+    except:
+        print('failed to load optimizer')
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.5, verbose=True)
 
     running_loss = 0.0
@@ -372,6 +383,7 @@ def trainNetwork(net, trainData, valData, noiseModel, postfix, device,
                                                                numMaskedPixels,
                                                                device,
                                                                augment = augment,
+                                                               mode=mode,
                                                                supervised = supervised)
             loss=lossFunction(outputs, labels, masks, noiseModel, pn2v, net.std)
             loss.backward()
@@ -388,8 +400,8 @@ def trainNetwork(net, trainData, valData, noiseModel, postfix, device,
             utils.printNow("avg. loss: "+str(np.mean(losses))+"+-(2SEM)"+str(2.0*np.std(losses)/np.sqrt(losses.size)))
             trainHist.append(np.mean(losses))
             losses=[]
-            torch.save(net,os.path.join(directory,"last_"+postfix+".net"))
-
+            torch.save(net,os.path.join(directory,"last.net"))
+            torch.save(optimizer.state_dict(),os.path.join(directory, 'optimizer.pt'))
             valCounter=0
             net.train(False)
             losses=[]
@@ -402,17 +414,18 @@ def trainNetwork(net, trainData, valData, noiseModel, postfix, device,
                                                                   numMaskedPixels,
                                                                   device,
                                                                   augment = augment,
+                                                                  mode=mode,
                                                                   supervised = supervised)
                 loss=lossFunction(outputs, labels, masks, noiseModel, pn2v, net.std)
                 losses.append(loss.item())
             net.train(True)
             avgValLoss=np.mean(losses)
             if len(valHist)==0 or avgValLoss < np.min(np.array(valHist)):
-                torch.save(net,os.path.join(directory,"best_"+postfix+".net"))
+                torch.save(net,os.path.join(directory,"best.net"))
             valHist.append(avgValLoss)
             scheduler.step(avgValLoss)
             epoch= (stepCounter / stepsPerEpoch)
-            np.save(os.path.join(directory,"history"+postfix+".npy"), (np.array( [np.arange(epoch),trainHist,valHist ] ) ) )
+            np.save(os.path.join(directory,"history"+".npy"), (np.array( [np.arange(epoch),trainHist,valHist ] ) ) )
 
     utils.printNow('Finished Training')
     return trainHist, valHist
